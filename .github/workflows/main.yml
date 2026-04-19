@@ -1,0 +1,39 @@
+name: Build BlueForce APK Cloud Init
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'zulu'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+      
+      - name: Initialize Project and Inject Code
+        run: |
+          cp App.js ../AppBackup.js
+          npx -y react-native@0.72.3 init BlueForceNative --skip-install --npm
+          cd BlueForceNative
+          cp ../../AppBackup.js ./App.js
+          npm install react-native-bluetooth-classic@^1.60.1-rc1
+          
+      - name: Build APK (Release)
+        run: |
+          cd BlueForceNative/android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+          
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: blueforce-apk
+          path: BlueForceNative/android/app/build/outputs/apk/debug/app-debug.apk

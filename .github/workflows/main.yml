@@ -1,4 +1,4 @@
-name: Build BlueForce APK Cloud Init
+name: Build BlueForce APK Standalone
 on: [push]
 
 jobs:
@@ -18,25 +18,24 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: Force Project Initialization
+      - name: Initialize Project
         run: |
           rm -rf BlueForceNative
-          # Usamos el comando más simple y estable
           npx @react-native-community/cli@latest init BlueForceNative --skip-install
           
-      - name: Inject Code
+      - name: Inject Code and Bundle
         run: |
-          # Metemos tu código de Bluetooth
           cp App.js BlueForceNative/App.js
           cd BlueForceNative
-          # Instalamos la versión más reciente de la librería de Bluetooth
           npm install react-native-bluetooth-classic@latest --save
+          # Este paso esencial "suelda" el código dentro de la App
+          mkdir -p android/app/src/main/assets
+          npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res
           
-      - name: Build APK (Debug)
+      - name: Build Standalone APK
         run: |
           cd BlueForceNative/android
           chmod +x gradlew
-          # Ejecutamos la compilación final
           ./gradlew assembleDebug --no-daemon
           
       - name: Upload APK
